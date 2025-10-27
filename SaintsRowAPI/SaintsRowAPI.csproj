@@ -79,12 +79,6 @@
     <Compile Include="SwapHelpers.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\AaltoTLS\AaltoTLS\AaltoTLS.csproj">
-      <Project>{c033352f-fd43-4eff-8ebf-997540c2ea37}</Project>
-      <Name>AaltoTLS</Name>
-    </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />

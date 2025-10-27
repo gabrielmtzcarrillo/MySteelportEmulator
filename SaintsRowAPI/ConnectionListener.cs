@@ -8,7 +8,6 @@ using System.Threading;
 
 using SaintsRowAPI.Hydra;
 
-using AaltoTLS;
 using System.Net.NetworkInformation;
 
 namespace SaintsRowAPI
