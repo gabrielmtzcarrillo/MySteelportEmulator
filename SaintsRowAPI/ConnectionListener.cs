@@ -40,6 +40,7 @@ namespace SaintsRowAPI
                 try
                 {
                     ListenSocket.Bind(new IPEndPoint(ip_remote, 443));
+                    IsConnected = true;
                     Console.WriteLine("Connected IP: " + ip_remote.ToString());
                 }
                 catch (SocketException sex)
