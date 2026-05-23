@@ -1,13 +1,13 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Net.Security;
-using System.Security.Authentication;
 using System.Text;
 using System.Threading.Tasks;
+using Org.BouncyCastle.Crypto.Tls;
+using Org.BouncyCastle.Security;
 
 using SaintsRowAPI.Hydra.DataTypes;
 
@@ -16,7 +16,8 @@ namespace SaintsRowAPI.Hydra
     public class HydraConnection
     {
         public Socket Socket { get; private set; }
-        public SslStream Stream { get; private set; }
+        public TlsServerProtocol Protocol { get; private set; }
+        public Stream Stream { get; private set; }
         public IPAddress IPAddress { get; private set; }
 
         public System.Diagnostics.Stopwatch Timer { get; private set; }
@@ -37,10 +38,9 @@ namespace SaintsRowAPI.Hydra
         public string ReadStringToCrLf()
         {
             StringBuilder sb = new StringBuilder();
-            bool done = false;
             bool lastWasCr = false;
             
-            while (!done)
+            while (true)
             {
                 byte b = ReadByte();
                 if (lastWasCr && b == 0x0A)
@@ -52,8 +52,6 @@ namespace SaintsRowAPI.Hydra
                 
                 lastWasCr = (b == 0x0D);
             }
-
-            return null;
         }
         public byte[] ReadBytes(long count)
         {
@@ -74,12 +72,14 @@ namespace SaintsRowAPI.Hydra
         {
             string line = String.Format(format, args) + "\r\n";
             byte[] buffer = Encoding.ASCII.GetBytes(line);
-            Stream.Write(buffer);
+            Stream.Write(buffer, 0, buffer.Length);
+            Stream.Flush();
         }
 
         public void WriteBytes(byte[] bytes)
         {
-            Stream.Write(bytes);
+            Stream.Write(bytes, 0, bytes.Length);
+            Stream.Flush();
         }
 
         public void Handle()
@@ -94,11 +94,22 @@ namespace SaintsRowAPI.Hydra
                 Console.Write("New connection: ", IPAddress);
                 Console.WriteLine();
 
-                Stream = new SslStream(new NetworkStream(Socket, false), false);
+                NetworkStream ns = new NetworkStream(Socket, false);
+                Protocol = new TlsServerProtocol(ns, new SecureRandom());
 
                 try
                 {
-                    Stream.AuthenticateAsServer(Certificates.Certificate, false, SslProtocols.None, false);
+                    if (Certificates.BcCertificate == null || Certificates.BcPrivateKey == null)
+                    {
+                        Console.WriteLine("[SSL Error] Bouncy Castle Certificate or Private Key is NULL!");
+                        loop = false;
+                    }
+                    else
+                    {
+                        HydraTlsServer tlsServer = new HydraTlsServer(Certificates.BcCertificate, Certificates.BcPrivateKey);
+                        Protocol.Accept(tlsServer);
+                        Stream = Protocol.Stream;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -170,15 +181,32 @@ namespace SaintsRowAPI.Hydra
 
             try
             {
-                Stream.Close();
+                if (Stream != null)
+                {
+                    Stream.Close();
+                }
+                else if (Protocol != null)
+                {
+                    // If handshake didn't complete, Protocol.Close() might throw alerts
+                    // We try to close it but swallow TLS specific errors
+                    Protocol.Close();
+                }
             }
+            catch (IOException) { /* Ignore socket reset/closed during alert send */ }
             catch (Exception ex)
             {
-                Console.WriteLine("[Sesion close EX] " + ex.Message);
+                Console.WriteLine("[Session close EX] " + ex.GetType().Name + ": " + ex.Message);
             }
             finally
             {
-                Socket.Disconnect(false);
+                try
+                {
+                    if (Socket.Connected)
+                    {
+                        Socket.Disconnect(false);
+                    }
+                }
+                catch { }
                 Socket.Dispose();
             }
 
