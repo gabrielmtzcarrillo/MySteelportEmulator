@@ -4,9 +4,10 @@ using System.Linq;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.Security;
+using System.Security.Authentication;
 using System.Text;
 using System.Threading.Tasks;
-using AaltoTLS;
 
 using SaintsRowAPI.Hydra.DataTypes;
 
@@ -15,7 +16,7 @@ namespace SaintsRowAPI.Hydra
     public class HydraConnection
     {
         public Socket Socket { get; private set; }
-        public SecureSession Session { get; private set; }
+        public SslStream Stream { get; private set; }
         public IPAddress IPAddress { get; private set; }
 
         public System.Diagnostics.Stopwatch Timer { get; private set; }
@@ -25,19 +26,12 @@ namespace SaintsRowAPI.Hydra
             Socket = socket;
         }
 
-        MemoryStream bufferStream = new MemoryStream();
         private byte ReadByte()
         {
-            if (bufferStream.Position == bufferStream.Length)
-            {
-                long oldPos = bufferStream.Position;
-                byte[] newData = Session.Receive();
-                bufferStream.Write(newData, 0, newData.Length);
-                bufferStream.Seek(oldPos, SeekOrigin.Begin);
-            }
-
-            byte b = (byte)bufferStream.ReadByte();
-            return b;
+            int b = Stream.ReadByte();
+            if (b == -1)
+                throw new EndOfStreamException();
+            return (byte)b;
         }
 
         public string ReadStringToCrLf()
@@ -64,9 +58,13 @@ namespace SaintsRowAPI.Hydra
         public byte[] ReadBytes(long count)
         {
             byte[] buffer = new byte[count];
-            for (long i = 0; i < count; i++)
+            int totalRead = 0;
+            while (totalRead < count)
             {
-                buffer[i] = ReadByte();
+                int read = Stream.Read(buffer, totalRead, (int)count - totalRead);
+                if (read == 0)
+                    throw new EndOfStreamException();
+                totalRead += read;
             }
 
             return buffer;
@@ -76,18 +74,16 @@ namespace SaintsRowAPI.Hydra
         {
             string line = String.Format(format, args) + "\r\n";
             byte[] buffer = Encoding.ASCII.GetBytes(line);
-            Session.Send(buffer);
+            Stream.Write(buffer);
         }
 
         public void WriteBytes(byte[] bytes)
         {
-            Session.Send(bytes);
+            Stream.Write(bytes);
         }
 
         public void Handle()
         {
-            NetworkStream networkStream  = null;
-
             try
             {
                 bool loop = true;
@@ -98,16 +94,15 @@ namespace SaintsRowAPI.Hydra
                 Console.Write("New connection: ", IPAddress);
                 Console.WriteLine();
 
-                networkStream = new NetworkStream(Socket);
+                Stream = new SslStream(new NetworkStream(Socket, false), false);
 
                 try
                 {
-                    Session = new SecureSession(networkStream, Certificates.SecurityParameters);
-                    Session.PerformServerHandshake(Certificates.Certificate);
+                    Stream.AuthenticateAsServer(Certificates.Certificate, false, SslProtocols.None, false);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine(ex.Message);
+                    Console.WriteLine("[SSL Auth EX] " + ex.ToString());
                     loop = false;
                 }
 
@@ -175,9 +170,7 @@ namespace SaintsRowAPI.Hydra
 
             try
             {
-                Session.Close();
-                networkStream.Flush();
-                networkStream.Close();
+                Stream.Close();
             }
             catch (Exception ex)
             {

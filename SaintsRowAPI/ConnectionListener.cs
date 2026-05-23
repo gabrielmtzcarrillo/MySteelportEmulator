@@ -8,7 +8,6 @@ using System.Threading;
 
 using SaintsRowAPI.Hydra;
 
-using AaltoTLS;
 using System.Net.NetworkInformation;
 
 namespace SaintsRowAPI
@@ -21,11 +20,21 @@ namespace SaintsRowAPI
 
         public ConnectionListener()
         {
-            IPHostEntry host_remote = Dns.GetHostEntry("sr3.hydra.agoragames.com");
-            IPAddress ip_remote = host_remote.AddressList.First();
+            IPAddress ip_remote = null;
+            try
+            {
+                IPHostEntry host_remote = Dns.GetHostEntry("sr3.hydra.agoragames.com");
+                ip_remote = host_remote.AddressList.First();
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("[ERROR] Could not resolve sr3.hydra.agoragames.com.");
+                Console.WriteLine("        Make sure you have pointed this host to 127.0.0.1 in your hosts file.");
+                return;
+            }
 
-            IPHostEntry host_local = Dns.GetHostEntry(IPAddress.Loopback);
-            IPAddress[] ip_local_all = host_local.AddressList;
+            // Check if the remote host points to this machine
+            IPAddress[] ip_local_all = Dns.GetHostAddresses(Dns.GetHostName()).Concat(new[] { IPAddress.Loopback, IPAddress.IPv6Loopback }).ToArray();
 
             ValidIP = ip_local_all.Any(local_ip => local_ip.Equals(ip_remote));
             
@@ -40,6 +49,7 @@ namespace SaintsRowAPI
                 try
                 {
                     ListenSocket.Bind(new IPEndPoint(ip_remote, 443));
+                    IsConnected = true;
                     Console.WriteLine("Connected IP: " + ip_remote.ToString());
                 }
                 catch (SocketException sex)

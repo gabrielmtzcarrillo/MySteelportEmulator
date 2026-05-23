@@ -20,7 +20,7 @@ namespace SaintsRowAPI
         public static T ReadStruct<T>(this Stream stream, int length)
         {
             byte[] data = new byte[length];
-            stream.Read(data, 0, data.Length);
+            stream.ReadExactly(data, 0, data.Length);
 
             IntPtr ptr = Marshal.AllocHGlobal(length);
             Marshal.Copy(data, 0, ptr, length);
@@ -53,21 +53,21 @@ namespace SaintsRowAPI
         public static Int16 ReadInt16(this Stream stream)
         {
             byte[] data = new byte[2];
-            stream.Read(data, 0, 2);
+            stream.ReadExactly(data, 0, 2);
             return BitConverter.ToInt16(data, 0);
         }
 
         public static Int32 ReadInt32(this Stream stream)
         {
             byte[] data = new byte[4];
-            stream.Read(data, 0, 4);
+            stream.ReadExactly(data, 0, 4);
             return BitConverter.ToInt32(data, 0);
         }
 
         public static Int64 ReadInt64(this Stream stream)
         {
             byte[] data = new byte[8];
-            stream.Read(data, 0, 8);
+            stream.ReadExactly(data, 0, 8);
             return BitConverter.ToInt64(data, 0);
         }
 
@@ -104,21 +104,21 @@ namespace SaintsRowAPI
         public static UInt16 ReadUInt16(this Stream stream)
         {
             byte[] data = new byte[2];
-            stream.Read(data, 0, 2);
+            stream.ReadExactly(data, 0, 2);
             return BitConverter.ToUInt16(data, 0);
         }
 
         public static UInt32 ReadUInt32(this Stream stream)
         {
             byte[] data = new byte[4];
-            stream.Read(data, 0, 4);
+            stream.ReadExactly(data, 0, 4);
             return BitConverter.ToUInt32(data, 0);
         }
 
         public static UInt64 ReadUInt64(this Stream stream)
         {
             byte[] data = new byte[8];
-            stream.Read(data, 0, 8);
+            stream.ReadExactly(data, 0, 8);
             return BitConverter.ToUInt64(data, 0);
         }
 
@@ -150,7 +150,7 @@ namespace SaintsRowAPI
         public static Double ReadFloat64(this Stream stream)
         {
             byte[] data = new byte[8];
-            stream.Read(data, 0, 8);
+            stream.ReadExactly(data, 0, 8);
             return BitConverter.ToDouble(data, 0);
         }
 
@@ -185,7 +185,7 @@ namespace SaintsRowAPI
         public static string ReadAsciiString(this Stream stream, int length)
         {
             byte[] bytes = new byte[length];
-            stream.Read(bytes, 0, length);
+            stream.ReadExactly(bytes, 0, length);
             return Encoding.ASCII.GetString(bytes);
         }
 

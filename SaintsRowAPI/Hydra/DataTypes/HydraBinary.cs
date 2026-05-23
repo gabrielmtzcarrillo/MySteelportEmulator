@@ -35,7 +35,7 @@ namespace SaintsRowAPI.Hydra.DataTypes
         {
             int length = s.ReadInt32().Swap();
             Value = new byte[length];
-            s.Read(Value, 0, length);
+            s.ReadExactly(Value, 0, length);
         }
 
         public string GetString()
