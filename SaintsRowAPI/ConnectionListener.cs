@@ -8,62 +8,118 @@ using System.Threading;
 
 using SaintsRowAPI.Hydra;
 
-using System.Net.NetworkInformation;
-
 namespace SaintsRowAPI
 {
     public class ConnectionListener
     {
+        private const string HydraHostName = "sr3.hydra.agoragames.com";
+        private const int HydraPort = 443;
+
         private Socket ListenSocket;
-        private bool ValidIP;
         public bool IsConnected { get; private set; }
 
         public ConnectionListener()
         {
-            IPAddress ip_remote = null;
+            IPAddress[] remoteAddresses = null;
             try
             {
-                IPHostEntry host_remote = Dns.GetHostEntry("sr3.hydra.agoragames.com");
-                ip_remote = host_remote.AddressList.First();
+                IPHostEntry host_remote = Dns.GetHostEntry(HydraHostName);
+                remoteAddresses = host_remote.AddressList;
             }
             catch (Exception)
             {
-                Console.WriteLine("[ERROR] Could not resolve sr3.hydra.agoragames.com.");
-                Console.WriteLine("        Make sure you have pointed this host to 127.0.0.1 in your hosts file.");
+                Console.WriteLine("[ERROR] Could not resolve {0}.", HydraHostName);
+                Console.WriteLine("        Make sure you have pointed this host to 127.0.0.1 or ::1 in your hosts file.");
                 return;
             }
 
             // Check if the remote host points to this machine
-            IPAddress[] ip_local_all = Dns.GetHostAddresses(Dns.GetHostName()).Concat(new[] { IPAddress.Loopback, IPAddress.IPv6Loopback }).ToArray();
+            IPAddress[] localAddresses = GetLocalAddresses();
+            IPAddress[] bindCandidates = GetLocalBindCandidates(remoteAddresses, localAddresses);
+            bool hasBindCandidates = bindCandidates.Any();
 
-            ValidIP = ip_local_all.Any(local_ip => local_ip.Equals(ip_remote));
-            
-            //https://stackoverflow.com/a/50577106/3930332
-            IPEndPoint[] ipEndPoints = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();
-            bool port_443_available = !ipEndPoints.Any(active_port => active_port.Port == 443);
-
-            if (ValidIP && port_443_available)
+            if (hasBindCandidates)
             {
-                ListenSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                SocketException bindException;
+                IPAddress boundAddress;
+                if (TryBind(bindCandidates, out boundAddress, out bindException))
+                {
+                    IsConnected = true;
+                    Console.WriteLine("Connected IP: " + boundAddress.ToString());
+                }
+                else if (bindException != null && bindException.SocketErrorCode == SocketError.AddressAlreadyInUse)
+                {
+                    Console.WriteLine("[ERROR] Port {0} is in use.", HydraPort);
+                }
+                else if (bindException != null)
+                {
+                    Console.WriteLine("Can't open port: {0}", bindException.Message);
+                }
+            }
+
+            if (!hasBindCandidates)
+                Console.WriteLine("[ERROR] {0} ({1}) doesn't point to this machine.", HydraHostName, FormatAddresses(remoteAddresses));
+        }
+
+        private static IPAddress[] GetLocalAddresses()
+        {
+            return Dns.GetHostAddresses(Dns.GetHostName())
+                .Concat(new[] { IPAddress.Loopback, IPAddress.IPv6Loopback })
+                .Where(IsSupportedAddress)
+                .Distinct()
+                .ToArray();
+        }
+
+        private static IPAddress[] GetLocalBindCandidates(IPAddress[] remoteAddresses, IPAddress[] localAddresses)
+        {
+            HashSet<IPAddress> localAddressSet = new HashSet<IPAddress>(localAddresses);
+
+            return remoteAddresses
+                .Where(IsSupportedAddress)
+                .Where(address => IPAddress.IsLoopback(address) || localAddressSet.Contains(address))
+                .OrderByDescending(IPAddress.IsLoopback)
+                .ToArray();
+        }
+
+        private static bool IsSupportedAddress(IPAddress address)
+        {
+            if (address.AddressFamily == AddressFamily.InterNetwork)
+                return true;
+
+            return address.AddressFamily == AddressFamily.InterNetworkV6 && Socket.OSSupportsIPv6;
+        }
+
+        private bool TryBind(IPAddress[] bindCandidates, out IPAddress boundAddress, out SocketException bindException)
+        {
+            boundAddress = null;
+            bindException = null;
+
+            foreach (IPAddress bindAddress in bindCandidates)
+            {
+                Socket socket = new Socket(bindAddress.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
+                if (bindAddress.AddressFamily == AddressFamily.InterNetworkV6)
+                    socket.DualMode = false;
 
                 try
                 {
-                    ListenSocket.Bind(new IPEndPoint(ip_remote, 443));
-                    IsConnected = true;
-                    Console.WriteLine("Connected IP: " + ip_remote.ToString());
+                    socket.Bind(new IPEndPoint(bindAddress, HydraPort));
+                    ListenSocket = socket;
+                    boundAddress = bindAddress;
+                    return true;
                 }
                 catch (SocketException sex)
                 {
-                    Console.WriteLine("Can't open port: {0}", sex.Message);
+                    bindException = sex;
+                    socket.Dispose();
                 }
-                
             }
 
-            if (!ValidIP)
-                Console.WriteLine("[ERROR] sr3.hydra.agoragames.com ({0}) doesn't point to this machine.", ip_remote);
-            
-            if (!port_443_available)
-                Console.WriteLine("[ERROR] Port 443 is in use.");
+            return false;
+        }
+
+        private static string FormatAddresses(IPAddress[] addresses)
+        {
+            return string.Join(", ", addresses.Select(address => address.ToString()));
         }
         
         private void AcceptCallback(IAsyncResult AR)

@@ -11,8 +11,23 @@ using Org.BouncyCastle.X509;
 
 namespace SaintsRowAPI
 {
+    public sealed class CertificateLoadException : Exception
+    {
+        public CertificateLoadException(string message)
+            : base(message)
+        {
+        }
+
+        public CertificateLoadException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+        }
+    }
+
     public static class Certificates
     {
+        private const string PfxPassword = "temp";
+
         public static X509Certificate2 Certificate { get; private set; }
         public static Org.BouncyCastle.X509.X509Certificate BcCertificate { get; private set; }
         public static AsymmetricKeyParameter BcPrivateKey { get; private set; }
@@ -21,32 +36,82 @@ namespace SaintsRowAPI
 
         public static void Load()
         {
+            byte[] pfxBytes = LoadEmbeddedPfxBytes();
+
+            Certificate = LoadRuntimeCertificate(pfxBytes);
+            if (!Certificate.HasPrivateKey)
+                throw new CertificateLoadException("Embedded PKCS#12 loaded, but the X509 certificate does not contain a private key.");
+
+            LoadBouncyCastleCertificateAndKey(pfxBytes);
+
+            Console.WriteLine("Certificate loaded. Subject: {0}", Certificate.Subject);
+            Console.WriteLine("Has Private Key: {0}", Certificate.HasPrivateKey);
+        }
+
+        private static byte[] LoadEmbeddedPfxBytes()
+        {
             try
             {
-                byte[] pfxBytes = Convert.FromBase64String(Pfx);
-                Certificate = X509CertificateLoader.LoadPkcs12(pfxBytes, "temp");
-                
-                // Convert to BouncyCastle types
-                var pkcs12 = new Org.BouncyCastle.Pkcs.Pkcs12StoreBuilder().Build();
-                using (var ms = new MemoryStream(pfxBytes))
-                {
-                    pkcs12.Load(ms, "temp".ToCharArray());
-                }
+                return Convert.FromBase64String(Pfx);
+            }
+            catch (FormatException ex)
+            {
+                throw new CertificateLoadException("Embedded PKCS#12 payload is not valid base64.", ex);
+            }
+        }
 
-                string alias = pkcs12.Aliases.Cast<string>().FirstOrDefault(a => pkcs12.IsKeyEntry(a));
-                if (alias != null)
-                {
-                    BcCertificate = pkcs12.GetCertificate(alias).Certificate;
-                    BcPrivateKey = pkcs12.GetKey(alias).Key;
-                }
-
-                Console.WriteLine("Certificate loaded. Subject: {0}", Certificate.Subject);
-                Console.WriteLine("Has Private Key: {0}", Certificate.HasPrivateKey);
+        private static X509Certificate2 LoadRuntimeCertificate(byte[] pfxBytes)
+        {
+            try
+            {
+                return X509CertificateLoader.LoadPkcs12(pfxBytes, PfxPassword);
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[Cert Load EX] " + ex.Message);
+                throw new CertificateLoadException("Embedded PKCS#12 could not be loaded by X509CertificateLoader. Verify the PFX bytes and password.", ex);
             }
+        }
+
+        private static void LoadBouncyCastleCertificateAndKey(byte[] pfxBytes)
+        {
+            Org.BouncyCastle.Pkcs.Pkcs12Store pkcs12;
+
+            try
+            {
+                pkcs12 = new Org.BouncyCastle.Pkcs.Pkcs12StoreBuilder().Build();
+                using (var ms = new MemoryStream(pfxBytes))
+                {
+                    pkcs12.Load(ms, PfxPassword.ToCharArray());
+                }
+            }
+            catch (Exception ex)
+            {
+                throw new CertificateLoadException("Embedded PKCS#12 could not be parsed by Bouncy Castle. TLS cannot start without this certificate/key pair.", ex);
+            }
+
+            string alias = pkcs12.Aliases.Cast<string>().FirstOrDefault(a => pkcs12.IsKeyEntry(a));
+            if (alias == null)
+                throw new CertificateLoadException("Embedded PKCS#12 does not contain a private-key entry.");
+
+            Org.BouncyCastle.Pkcs.X509CertificateEntry certificateEntry = pkcs12.GetCertificate(alias);
+            if (certificateEntry == null || certificateEntry.Certificate == null)
+                throw new CertificateLoadException(String.Format("Embedded PKCS#12 private-key entry '{0}' does not include a certificate.", alias));
+
+            Org.BouncyCastle.Pkcs.AsymmetricKeyEntry keyEntry = pkcs12.GetKey(alias);
+            if (keyEntry == null || keyEntry.Key == null)
+                throw new CertificateLoadException(String.Format("Embedded PKCS#12 private-key entry '{0}' could not be loaded.", alias));
+
+            if (!keyEntry.Key.IsPrivate)
+                throw new CertificateLoadException(String.Format("Embedded PKCS#12 key entry '{0}' is not a private key.", alias));
+
+            BcCertificate = certificateEntry.Certificate;
+            BcPrivateKey = keyEntry.Key;
+
+            if (BcCertificate == null)
+                throw new CertificateLoadException("Bouncy Castle certificate was not loaded from the embedded PKCS#12 payload.");
+
+            if (BcPrivateKey == null)
+                throw new CertificateLoadException("Bouncy Castle private key was not loaded from the embedded PKCS#12 payload.");
         }
     }
 }

@@ -17,7 +17,24 @@ namespace SaintsRowAPI.ConsoleHost
             Console.WriteLine("https://www.saintsrowmods.com/forum/threads/my-steelport-emulator.17361/");
             Console.WriteLine();
 
-            Certificates.Load();
+            try
+            {
+                Certificates.Load();
+            }
+            catch (CertificateLoadException ex)
+            {
+                Console.WriteLine("[Certificate Error] " + ex.Message);
+
+                if (ex.InnerException != null)
+                    Console.WriteLine("    Inner exception: {0}: {1}", ex.InnerException.GetType().Name, ex.InnerException.Message);
+
+                Console.WriteLine("    Startup aborted before opening the listener.");
+                Console.WriteLine("    Check the embedded PKCS#12 payload in SaintsRowAPI/Certificates.cs and its password.");
+                Console.WriteLine();
+                Environment.ExitCode = 1;
+                return;
+            }
+
             ConnectionListener Listener = new ConnectionListener();
             Listener.Listen();
 
